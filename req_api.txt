@@ -1,0 +1,9 @@
+# IMPORTANT : mets ici les MÊMES versions que dans ton environnement local
+# (pip freeze | findstr "scikit pandas numpy imbalanced mlflow") pour que le .pkl se recharge sans erreur
+pandas==2.2.3
+joblib==1.4.2
+fastapi==0.115.4
+uvicorn[standard]==0.32.0
+pydantic==2.9.2
+scikit-learn==1.9.0
+
