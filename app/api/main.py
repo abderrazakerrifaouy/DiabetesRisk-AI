@@ -59,7 +59,9 @@ def predict_diabetes_risk(data: UserData):
     prediction = model.predict(input_data)
 
     return {
-        "prediction": "high risk" if prediction[0] == 0 else "low risk"
+        "prediction": "high risk" if prediction[0] == 0 else "low risk",
+        "probability_high_risk": model.predict_proba(input_data)[0][0],
+        "probability_low_risk": model.predict_proba(input_data)[0][1]
     }
 
 

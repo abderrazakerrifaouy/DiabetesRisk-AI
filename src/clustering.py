@@ -1,8 +1,17 @@
+from pathlib import Path
+
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
 import mlflow
+
+
+
+PROJECT_DIR = Path("/opt/airflow/project")
+
+PROCESSED_DATA = PROJECT_DIR / "data" / "processed" / "cleaned_data_diabetes.csv"
+CLUSTRED_DATA = PROJECT_DIR / "data" / "processed" / "clustered_data_diabetes.csv"
 
 
 
@@ -106,35 +115,24 @@ class Clustering:
         except Exception as e:
             mlflow.log_text(f"Error saving clustered data: {e}", "data_saving_log.txt")
 
+    def run_clustering_pipeline(self, n_clusters=2):
+        mlflow.set_tracking_uri("http://mlflow:5000")
+        mlflow.set_experiment("DiabetsRisk-AI-Clustering")
+
+        with mlflow.start_run(run_name="KMeans-Clustering"):
+            self._loadData()
+            self._preprocessData()
+            labels = self._fitKMeans(n_clusters)
+            if labels is not None:
+                self._add_labels_to_data(labels)
+                self._save_clustered_data(CLUSTRED_DATA)
+                mlflow.log_param("n_clusters", n_clusters)
+                mlflow.log_param('algorithm', 'KMeans')
+                mlflow.log_param("random_state", 42)
+                mlflow.log_artifact(CLUSTRED_DATA, artifact_path="clustered_data")
+            mlflow.end_run()
+
 if __name__ == "__main__":
 
-    mlflow.set_tracking_uri("http://localhost:5000")
-
-    mlflow.set_experiment("DiabetsRisk-AI-Clustering")
-
-    with mlflow.start_run(run_name="KMeans-Clustering"):
-        clustering = Clustering("data/processed/cleaned_data_diabets.csv")
-        clustering._loadData()
-
-        clustering._preprocessData()
-
-        labels = clustering._fitKMeans(2)
-        clustering._add_labels_to_data(labels)
-        clustering._save_clustered_data("data/processed/clustered_data_diabetes.csv")
-
-        mlflow.log_param("n_clusters", 2)
-
-        mlflow.log_param(
-            'algorithm', 'KMeans'
-        )
-
-        mlflow.log_param(
-            "random_state",
-            42
-        )
-
-        mlflow.log_artifact("data/processed/clustered_data_diabetes.csv", artifact_path="clustered_data")
-
-        
-
-        mlflow.end_run()
+    clustering = Clustering(PROCESSED_DATA)
+    clustering.run_clustering_pipeline(n_clusters=2)

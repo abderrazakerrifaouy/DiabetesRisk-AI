@@ -1,3 +1,4 @@
+from pathlib import Path
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
@@ -11,6 +12,10 @@ from sklearn.pipeline import Pipeline
 import joblib
 import mlflow
 
+PROJECT_DIR = Path("/opt/airflow/project")
+
+CLUSTRED_DATA = PROJECT_DIR / "data" / "processed" / "clustered_data_diabetes.csv"
+MODEL_DIR = PROJECT_DIR / "models"
 
 
 class Classification:
@@ -184,7 +189,7 @@ class Classification:
                         'Precision': precision,
                         'Recall': recall,
                         'F1 Score': f1,
-                        'Confusion Matrix': cm
+                        'Confusion Matrix': cm.tolist()
                     })
                     self.save_model(model , model_name)
                     mlflow.log_text(f"Model: {model_name}\nAccuracy: {accuracy:.4f}\nPrecision: {precision:.4f}\nRecall: {recall:.4f}\nF1 Score: {f1:.4f}\nConfusion Matrix:\n{cm}", "model_metrics.txt")
@@ -196,43 +201,45 @@ class Classification:
 
     def save_model(self, model, model_name):
         try:
-            joblib.dump(model, f'models/{model_name}_model.pkl')
-            mlflow.log_artifact(f'models/{model_name}_model.pkl', "models")
+            joblib.dump(model, MODEL_DIR / f"{model_name}_model.pkl")
+            mlflow.log_artifact(MODEL_DIR / f"{model_name}_model.pkl", artifact_path="models")
 
         except Exception as e:
             print(f"Error saving model: {e}")
 
+    def run_pipeline(self, target_column):
+        mlflow.set_tracking_uri("http://mlflow:5000")  
+        mlflow.set_experiment("DiabetsRisk-AI-Classification")
+
+        self.loadData()
+        self.splitData(target_column)
+        self.splitTrainTest()
+        models = {}
+        models['Logistic_Regression'] = self.train_logistic()
+        models['Random Forest'] = self.train_random_forest()
+        models['SVM'] = self.train_SVM()
+        models['KNN'] = self.train_knn()
+        results = self.compare_models(models)
+        return results
+
         
     
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    mlflow.set_tracking_uri("http://localhost:5000")  
-    mlflow.set_experiment("DiabetsRisk-AI-Classification")
-    
-    path = "data/processed/clustered_data_diabetes.csv"
-    target_column = "Cluster"  
-    models = {}
-    classifier = Classification(path)
-    classifier.loadData()
-    classifier.splitData(target_column)
-    classifier.splitTrainTest()
-    models['Logistic Regression'] = classifier.train_logistic()
-    models['Random Forest'] = classifier.train_random_forest()
-    models['SVM'] = classifier.train_SVM()
-    models['KNN'] = classifier.train_knn()
-
-    results = classifier.compare_models(models)
-
-    for result in results:
-        print("-" * 30)
-        print(f"Model: {result['Model']}")
-        print(f"Accuracy: {result['Accuracy']:.4f}")
-        print(f"Precision: {result['Precision']:.4f}")
-        print(f"Recall: {result['Recall']:.4f}")
-        print(f"F1 Score: {result['F1 Score']:.4f}")
-        print("Confusion Matrix:")
-        print(result['Confusion Matrix'])
-        print("-" * 30)
+#     path = CLUSTRED_DATA
+#     target_column = "Cluster"  
+#     classifier = Classification(path)
+#     results = classifier.run_pipeline(target_column)
+#     for result in results:
+#         print("-" * 30)
+#         print(f"Model: {result['Model']}")
+#         print(f"Accuracy: {result['Accuracy']:.4f}")
+#         print(f"Precision: {result['Precision']:.4f}")
+#         print(f"Recall: {result['Recall']:.4f}")
+#         print(f"F1 Score: {result['F1 Score']:.4f}")
+#         print("Confusion Matrix:")
+#         print(result['Confusion Matrix'])
+#         print("-" * 30)
 
 
 

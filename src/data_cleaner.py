@@ -86,9 +86,11 @@ class DataCleaner:
         df_cleaned = self.clean_data()
         df_cleaned.to_csv(output_path, index=False)
 
+    def run_cleaning_pipeline(self, output_path: str | Path) -> None:
+        self.load()
+        self.clean_data()
+        self.save_cleaned_data(output_path)
 
 if __name__ == "__main__":
     cleaner = DataCleaner("C:/Users/safiy/Desktop/les brief/DiabetesRisk-AI/data/raw/dataset-diabete.csv")
-    cleaner.load()
-    df_cleaned = cleaner.clean_data()
-    cleaner.save_cleaned_data("data/processed/cleaned_data_diabetes.csv")
+    cleaner.run_cleaning_pipeline("data/processed/cleaned_data_diabetes.csv")

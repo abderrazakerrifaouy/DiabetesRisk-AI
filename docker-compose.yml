@@ -89,6 +89,9 @@ services:
       dockerfile: docker/Dockerfile.streamlit
     image: diabete-streamlit
     container_name: diabete-streamlit
+    volumes:
+      - ./app:/code/app
+      - ./models:/code/models
     environment:
       API_URL: http://api:8000
     depends_on:
