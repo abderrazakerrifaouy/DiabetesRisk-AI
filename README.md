@@ -1,487 +1,484 @@
-# DiabetesRisk-AI — Système Intelligent de Prédiction du Risque de Diabète
+# DiabetesRisk-AI
 
-## 1. Présentation du projet
+An end-to-end Machine Learning system for diabetes risk prediction. The project combines unsupervised clustering (K-Means) with supervised classification (Logistic Regression, KNN, SVM, Random Forest) to segment patients into risk profiles and predict the group of new observations. It ships as a fully containerised stack — FastAPI prediction service, Streamlit UI, MLflow experiment tracking, Apache Airflow pipeline orchestration, and PostgreSQL metadata store — all managed through Docker Compose.
 
-**DiabetesRisk-AI** est un système intelligent de Machine Learning conçu pour analyser des données cliniques, identifier des profils de patients présentant des caractéristiques similaires et prédire leur groupe à partir de nouvelles observations.
-
-Le projet repose sur deux approches complémentaires :
-
-- **Clustering non supervisé :** utilisation de K-Means pour segmenter les patients en groupes homogènes.
-- **Classification supervisée :** entraînement et comparaison de plusieurs algorithmes pour prédire le groupe d'un nouveau patient.
-
-Le projet intègre également des outils MLOps pour assurer le suivi des expériences, l'automatisation de l'entraînement et le déploiement du modèle.
-
-### Objectifs
-
-- Préparer et analyser les données cliniques.
-- Identifier les profils de patients grâce au clustering.
-- Comparer plusieurs modèles de classification.
-- Optimiser et sauvegarder le modèle final dans une pipeline complète.
-- Suivre les expériences avec MLflow.
-- Exposer les prédictions à travers une API REST avec FastAPI.
-- Développer une interface utilisateur avec Streamlit.
-- Automatiser le processus d'entraînement avec Apache Airflow.
-- Conteneuriser les services avec Docker et Docker Compose.
-
-> **Important :** le niveau de risque estimé est basé sur les profils identifiés dans le dataset et ne constitue pas un diagnostic médical.
+> **Disclaimer:** The risk level is derived from statistical patterns in the dataset and does **not** constitute a medical diagnosis.
 
 ---
 
-## 2. Technologies utilisées
+## Table of Contents
 
-| Technologie | Utilisation |
-|---|---|
-| Python | Langage principal |
-| Pandas & NumPy | Manipulation et analyse des données |
-| Matplotlib & Seaborn | Visualisation des données |
-| Scikit-learn | Prétraitement et Machine Learning |
-| K-Means | Clustering non supervisé |
-| Logistic Regression, KNN, SVM, Random Forest | Classification supervisée |
-| GridSearchCV | Optimisation des hyperparamètres |
-| Joblib | Sérialisation des pipelines et modèles |
-| MLflow | Tracking des expériences et gestion des modèles |
-| FastAPI | Création de l'API de prédiction |
-| Streamlit | Interface web interactive |
-| Apache Airflow | Orchestration du pipeline ML |
-| Docker & Docker Compose | Conteneurisation des services |
-| PostgreSQL | Stockage des métadonnées selon la configuration Docker |
+1. [Architecture Overview](#1-architecture-overview)
+2. [Project Structure](#2-project-structure)
+3. [Technology Stack](#3-technology-stack)
+4. [Dataset](#4-dataset)
+5. [Data Pipeline](#5-data-pipeline)
+6. [Docker Services](#6-docker-services)
+7. [API Reference](#7-api-reference)
+8. [Getting Started](#8-getting-started)
+9. [Notebooks](#9-notebooks)
+10. [Limitations](#10-limitations)
+11. [Future Improvements](#11-future-improvements)
+12. [Author & Academic Context](#12-author--academic-context)
 
 ---
 
-## 3. Dataset
+## 1. Architecture Overview
 
-Le projet utilise le fichier `dataset-diabete.csv`, qui contient des observations cliniques de patients.
+```
+┌──────────────┐        ┌──────────────┐        ┌──────────────┐
+│   Streamlit  │──POST──│   FastAPI     │──load──│   models/    │
+│   :8501      │  /predict│   :8000     │        │   *.pkl      │
+└──────────────┘        └──────────────┘        └──────────────┘
+                              │
+                        (reads model)
+                              │
+┌──────────────┐        ┌──────────────┐        ┌──────────────┐
+│   Airflow    │──runs──│   src/       │──logs──│   MLflow     │
+│   :8080      │        │  pipeline    │        │   :5000      │
+└──────────────┘        └──────────────┘        └──────────────┘
+                                                      │
+                                                ┌──────────────┐
+                                                │  PostgreSQL  │
+                                                │  (metadata)  │
+                                                └──────────────┘
+```
 
-### Variables utilisées
+**Flow summary:**
 
-| Variable | Description |
-|---|---|
-| `Pregnancies` | Nombre de grossesses |
-| `Glucose` | Taux de glucose |
-| `BloodPressure` | Pression artérielle |
-| `SkinThickness` | Épaisseur du pli cutané |
-| `Insulin` | Taux d'insuline |
-| `BMI` | Indice de masse corporelle |
-| `DiabetesPedigreeFunction` | Indicateur lié aux antécédents familiaux de diabète |
-| `Age` | Âge du patient |
-
-La variable `Cluster` est ajoutée après l'étape de clustering et sert de cible pour la classification supervisée.
-
-### Source des données
-
-Le dataset utilisé est fourni dans les ressources du brief pédagogique.
-
-Fichier source : `data/raw/dataset-diabete.csv`
+1. **Airflow** triggers the `retrain_diabetes_dag` on a monthly schedule.
+2. The DAG executes three sequential tasks: **clean data → cluster → train & evaluate models**.
+3. Every clustering and classification run logs parameters, metrics, and artifacts to **MLflow**, backed by **PostgreSQL**.
+4. Trained model pipelines (`.pkl`) are saved to the `models/` directory.
+5. **FastAPI** loads the `Logistic_Regression_model.pkl` at prediction time and exposes a `POST /predict` endpoint.
+6. **Streamlit** provides a web form that sends patient data to the API and displays the prediction result.
 
 ---
 
-## 4. Architecture du projet
+## 2. Project Structure
 
-```text
+```
 DiabetesRisk-AI/
+│
+├── app/
+│   ├── api/
+│   │   └── main.py                  # FastAPI application (prediction endpoint)
+│   └── ui/
+│       └── streamlit_app.py         # Streamlit web interface
+│
+├── src/
+│   ├── data_profiler.py             # DataProfiler class – EDA utilities
+│   ├── data_cleaner.py              # DataCleaner class – cleaning pipeline
+│   ├── clustering.py                # Clustering class – K-Means with MLflow tracking
+│   └── classification/
+│       └── classification.py        # Classification class – train, evaluate & compare models
+│
+├── dags/
+│   └── retrain_diabetes_dag.py      # Airflow DAG – monthly retraining pipeline
 │
 ├── data/
 │   ├── raw/
-│   │   └── dataset-diabete.csv
+│   │   └── dataset-diabete.csv      # Original clinical dataset
 │   └── processed/
-│       ├── cleaned_data_diabetes.csv
-│       └── clustered_data_diabetes.csv
-│
-├── notebooks/
-│   └── diabetes_analysis.ipynb
-│
-├── src/
-│   ├── preprocessing/
-│   ├── clustering/
-│   ├── classification/
-│   └── ...
+│       ├── cleaned_data_diabetes.csv    # Output of DataCleaner
+│       └── clustered_data_diabetes.csv  # Output of Clustering (includes Cluster column)
 │
 ├── models/
 │   ├── Logistic_Regression_model.pkl
 │   ├── KNN_model.pkl
-│   ├── Random_Forest_model.pkl
+│   ├── Random Forest_model.pkl
 │   └── SVM_model.pkl
 │
-├── app/
-│   ├── api/
-│   │   └── main.py
-│   └── streamlit/
-│       └── app.py
+├── notebooks/
+│   ├── 01_data_profiling.ipynb
+│   ├── 02_eda_guide_graphes.ipynb
+│   ├── 03_clustering.ipynb
+│   └── 04_cluster_analysis.ipynb
 │
-├── dags/
-│   └── retrain_diabetes_dag.py
+├── docker/
+│   ├── Dockerfile.api               # Python 3.11 + FastAPI/Uvicorn
+│   ├── Dockerfile.streamlit         # Python 3.11 + Streamlit
+│   ├── Dockerfile.airflow           # Apache Airflow 2.9.3 + project deps
+│   ├── Dockerfile.mlflow            # Python 3.11 + MLflow server
+│   └── init-db.sql                  # Creates the `mlflow` database on first run
 │
-├── Dockerfile
-├── docker-compose.yml
-├── requirements.txt
+├── tests/
+│   └── test_model.py                # Basic model prediction smoke test
+│
+├── docker-compose.yml               # Orchestrates all services
+├── requirements.txt                 # Full Python dependencies (Airflow image)
+├── req_api.txt                      # Lightweight dependencies (API image)
+├── .env                             # Environment variables for Docker Compose
+├── .dockerignore
 └── README.md
 ```
 
-*Cette arborescence est indicative : adaptez les noms et les chemins aux fichiers réellement présents dans votre dépôt.*
+---
+
+## 3. Technology Stack
+
+| Category | Technology | Purpose |
+|---|---|---|
+| **Language** | Python 3.11 | Core language for all services |
+| **Data** | Pandas, NumPy | Data manipulation and analysis |
+| **Visualisation** | Matplotlib, Seaborn | EDA charts (notebooks) |
+| **ML – Preprocessing** | Scikit-learn (`StandardScaler`, `KNNImputer`) | Feature scaling & missing-value imputation |
+| **ML – Clustering** | Scikit-learn (`KMeans`) | Unsupervised patient segmentation |
+| **ML – Classification** | Scikit-learn (`LogisticRegression`, `KNeighborsClassifier`, `SVC`, `RandomForestClassifier`) | Supervised risk group prediction |
+| **ML – Tuning** | Scikit-learn (`GridSearchCV`, `Pipeline`) | Hyperparameter optimisation with cross-validation |
+| **Serialisation** | Joblib | Model pipeline persistence (`.pkl` files) |
+| **Experiment Tracking** | MLflow 2.17.2 | Log params, metrics, artifacts & confusion matrices |
+| **API** | FastAPI 0.115.4 + Uvicorn | REST prediction service |
+| **UI** | Streamlit 1.39.0 | Interactive web form for predictions |
+| **Orchestration** | Apache Airflow 2.9.3 | Monthly retraining DAG |
+| **Database** | PostgreSQL 15 | Metadata backend for Airflow & MLflow |
+| **Containerisation** | Docker & Docker Compose | Multi-service deployment |
 
 ---
 
-## 5. Démarche de Machine Learning
+## 4. Dataset
 
-### Étape 1 — Analyse exploratoire des données (EDA)
+**File:** `data/raw/dataset-diabete.csv`
 
-L'analyse exploratoire permet de comprendre la structure du dataset avant l'entraînement des modèles.
+The dataset contains clinical observations of patients with the following features:
 
-Les opérations réalisées comprennent :
+| Feature | Description |
+|---|---|
+| `Pregnancies` | Number of pregnancies |
+| `Glucose` | Plasma glucose concentration |
+| `BloodPressure` | Diastolic blood pressure (mm Hg) |
+| `SkinThickness` | Triceps skinfold thickness (mm) |
+| `Insulin` | 2-hour serum insulin (μU/ml) |
+| `BMI` | Body mass index (kg/m²) |
+| `DiabetesPedigreeFunction` | Diabetes pedigree function (family history indicator) |
+| `Age` | Age in years |
 
-- Chargement des données avec Pandas.
-- Analyse des dimensions et des types de variables.
-- Détection des valeurs manquantes et des doublons.
-- Analyse statistique des variables numériques.
-- Visualisation des distributions et des relations entre les variables.
-
-### Étape 2 — Prétraitement des données
-
-Le prétraitement vise à rendre les données exploitables par les algorithmes de Machine Learning.
-
-Les opérations comprennent :
-
-- Identification des valeurs incohérentes et des valeurs manquantes.
-- Traitement des valeurs nulles ou des zéros représentant des mesures manquantes dans certaines variables cliniques.
-- Imputation des valeurs manquantes.
-- Détection des valeurs aberrantes à l'aide de méthodes statistiques comme l'IQR.
-- Analyse des corrélations et des relations entre les variables.
-- Standardisation des variables numériques avec `StandardScaler`.
-
-Les valeurs aberrantes sont étudiées avant toute décision de traitement, afin de préserver autant que possible les informations utiles du dataset.
-
-### Étape 3 — Clustering avec K-Means
-
-K-Means permet de regrouper les patients selon la similarité de leurs caractéristiques cliniques.
-
-Les étapes comprennent :
-
-1. Standardiser les variables numériques.
-2. Étudier différentes valeurs de `k`.
-3. Utiliser la méthode du coude (*Elbow Method*).
-4. Calculer le coefficient de silhouette (*Silhouette Score*).
-5. Sélectionner le nombre de clusters approprié.
-6. Entraîner le modèle K-Means.
-7. Ajouter la colonne `Cluster` au dataset.
-8. Visualiser et interpréter les groupes obtenus.
-
-### Étape 4 — Analyse et interprétation des clusters
-
-Les clusters sont analysés à partir de leurs effectifs et des moyennes de leurs caractéristiques cliniques.
-
-Les critères de référence du brief sont notamment :
-
-- `Glucose > 126`
-- `BMI > 30`
-- `DiabetesPedigreeFunction > 0.5`
-
-Le groupe présentant globalement les caractéristiques les plus élevées selon ces indicateurs peut être interprété comme un profil potentiellement à risque plus élevé.
-
-Une colonne `risk_category` peut ensuite être créée à partir de la correspondance entre le numéro du cluster et son interprétation.
-
-**Attention :** les identifiants des clusters sont arbitraires. Le cluster `0` n'est pas automatiquement à faible risque, et le cluster `1` n'est pas automatiquement à haut risque. Cette correspondance doit être établie à partir des résultats de l'analyse.
-
-### Étape 5 — Classification supervisée
-
-La classification apprend à prédire le groupe attribué par K-Means à partir des caractéristiques d'un patient.
-
-Les modèles étudiés comprennent :
-
-- Logistic Regression
-- K-Nearest Neighbors (KNN)
-- Support Vector Machine (SVM)
-- Random Forest
-
-La démarche comprend :
-
-- Séparation des données en ensembles d'entraînement et de test.
-- Construction de pipelines de prétraitement et de classification.
-- Entraînement des différents algorithmes sur les mêmes données.
-- Optimisation des hyperparamètres avec `GridSearchCV`.
-- Comparaison des performances.
-- Sélection et sauvegarde de la pipeline finale avec Joblib.
-
-### Métriques d'évaluation
-
-Les modèles sont évalués à l'aide de plusieurs métriques :
-
-- Accuracy
-- Precision
-- Recall
-- F1-score
-- Matrice de confusion
-
-Ces métriques permettent d'évaluer la capacité du modèle à prédire les groupes et à limiter les erreurs de classification.
-
-### Étape 6 — Suivi des expériences avec MLflow
-
-MLflow permet de centraliser les informations relatives aux entraînements et de faciliter leur comparaison et leur reproductibilité.
-
-Les informations suivies comprennent :
-
-- Les paramètres des modèles.
-- Les hyperparamètres explorés.
-- Les métriques d'évaluation.
-- Les paramètres et métriques du clustering.
-- Les matrices de confusion sous forme d'artefacts.
-- Les fichiers des modèles et des pipelines.
-- Les informations utiles sur les features et les versions des bibliothèques.
-
-Le registre MLflow peut être utilisé pour gérer les versions du modèle et promouvoir une version validée vers la production, lorsque cette fonctionnalité est configurée.
-
-### Étape 7 — API, interface web et orchestration
-
-**FastAPI**
-
-L'API reçoit les caractéristiques cliniques d'un patient au format JSON, charge la pipeline sauvegardée et retourne le groupe prédit ainsi que les informations de risque calculées par l'application.
-
-**Streamlit**
-
-L'interface web permet à l'utilisateur de saisir les informations cliniques et d'afficher le résultat retourné par l'API.
-
-L'interface peut présenter un indicateur visuel du niveau de risque et des recommandations générales de suivi, sans remplacer une évaluation médicale.
-
-**Apache Airflow**
-
-Le DAG automatise les principales étapes du pipeline, selon sa configuration :
-
-- Chargement des données.
-- Prétraitement.
-- Clustering.
-- Entraînement et évaluation des modèles.
-- Sauvegarde des artefacts.
-- Suivi des expériences avec MLflow.
-
-**Docker Compose**
-
-Docker Compose orchestre les différents services afin de faciliter leur lancement et leur gestion dans un environnement commun.
+After clustering, a `Cluster` column is appended and used as the target variable for supervised classification.
 
 ---
 
-## 6. Installation et exécution
+## 5. Data Pipeline
 
-### Prérequis
+The pipeline is implemented across three Python modules and orchestrated by an Airflow DAG.
 
-- Python 3.13, si compatible avec les dépendances retenues.
-- Docker et Docker Compose.
-- Git.
-- Un environnement disposant des ressources nécessaires à l'exécution des services.
+### 5.1 Data Cleaning (`src/data_cleaner.py`)
 
-### Étape 1 — Cloner le projet
+The `DataCleaner` class performs the following steps:
+
+1. Load the raw CSV.
+2. Drop the spurious `Unnamed: 0` index column (if present).
+3. Replace biologically impossible zeros (`Glucose`, `BloodPressure`, `SkinThickness`, `Insulin`, `BMI`) with `NaN`.
+4. Detect outliers via the IQR method and cap them (winsorisation).
+5. Impute remaining missing values with `KNNImputer` (k=3).
+6. Save the cleaned dataset to `data/processed/cleaned_data_diabetes.csv`.
+
+### 5.2 Clustering (`src/clustering.py`)
+
+The `Clustering` class performs the following steps:
+
+1. Load the cleaned data.
+2. Standardise features with `StandardScaler`.
+3. Determine the optimal number of clusters using the **Elbow Method** and **Silhouette Score** (utilities available, default `n_clusters=2`).
+4. Fit a `KMeans` model.
+5. Append the `Cluster` label to the dataset.
+6. Save the result to `data/processed/clustered_data_diabetes.csv`.
+7. Log parameters and artifacts to MLflow (experiment: `DiabetsRisk-AI-Clustering`).
+
+### 5.3 Classification (`src/classification/classification.py`)
+
+The `Classification` class performs the following steps:
+
+1. Load the clustered dataset.
+2. Split into features (`X`) and target (`Cluster` column / `y`).
+3. Train/test split (80/20, stratified).
+4. For each algorithm, build a `Pipeline` of `StandardScaler` + model, then run `GridSearchCV` (5-fold CV):
+   - **Logistic Regression** – grid over `C`, `max_iter`, `solver`.
+   - **SVM** – grid over `C`, `kernel`, `gamma`.
+   - **Random Forest** – grid over `n_estimators`, `max_depth`, `min_samples_split`.
+   - **KNN** – grid over `n_neighbors`, `weights`, `algorithm`.
+5. Evaluate all best estimators on the test set: **Accuracy**, **Precision**, **Recall**, **F1-score**, **Confusion Matrix**.
+6. Log every metric, parameter, and confusion matrix to MLflow (experiment: `DiabetsRisk-AI-Classification`).
+7. Save each model pipeline to `models/<ModelName>_model.pkl` and log the artifact to MLflow.
+
+### 5.4 Airflow DAG (`dags/retrain_diabetes_dag.py`)
+
+| Property | Value |
+|---|---|
+| DAG ID | `retrain_diabetes_dag` |
+| Schedule | `@monthly` |
+| Catchup | `False` |
+
+**Tasks (sequential):**
+
+```
+clean_data  ──▶  cluster_data  ──▶  train_model
+```
+
+1. `clean_data` — runs `DataCleaner.run_cleaning_pipeline()`.
+2. `cluster_data` — runs `Clustering.run_clustering_pipeline(n_clusters=2)`.
+3. `train_model` — runs `Classification.run_pipeline(target_column="Cluster")`.
+
+### 5.5 Data Profiling (`src/data_profiler.py`)
+
+The `DataProfiler` class provides exploratory analysis utilities:
+
+- Shape & dtype inspection
+- Missing value counts
+- Duplicate detection
+- Zero-value counts per column
+- Numeric distribution statistics (`.describe()`)
+- Outlier counts via IQR
+- Correlation matrix
+
+These methods are used interactively in notebooks and do not form part of the automated pipeline.
+
+---
+
+## 6. Docker Services
+
+All services are defined in `docker-compose.yml` and configured via the `.env` file.
+
+| Service | Container Name | Image | Port | Description |
+|---|---|---|---|---|
+| `postgres` | `diabete-postgres` | `postgres:15` | — | Metadata store for Airflow & MLflow |
+| `mlflow` | `diabete-mlflow` | `diabete-mlflow` | `5000` | Experiment tracking server |
+| `api` | `diabete-api` | `diabete-api` | `8000` | FastAPI prediction service |
+| `streamlit` | `diabete-streamlit` | `diabete-streamlit` | `8501` | Streamlit web UI |
+| `airflow-init` | `diabete-airflow-init` | `diabete-airflow` | — | One-shot: DB migration & admin user creation |
+| `airflow-webserver` | `diabete-airflow-web` | `diabete-airflow` | `8080` | Airflow web UI |
+| `airflow-scheduler` | `diabete-airflow-scheduler` | `diabete-airflow` | — | Airflow task scheduler |
+
+**Named volumes:** `postgres_data`, `mlflow_artifacts`, `airflow_logs`.
+
+### Service Dependencies
+
+```
+postgres (healthy)
+  ├── mlflow (healthy)
+  │     ├── api
+  │     │     └── streamlit
+  │     ├── airflow-init (completed)
+  │     │     ├── airflow-webserver
+  │     │     └── airflow-scheduler
+```
+
+---
+
+## 7. API Reference
+
+The API is built with **FastAPI** and served by **Uvicorn** on port `8000`.
+
+### `GET /`
+
+Health check.
+
+**Response:**
+```json
+{
+  "message": "Diabetes Risk API is running"
+}
+```
+
+### `POST /predict`
+
+Predict the diabetes risk group for a patient.
+
+**Request body (JSON):**
+
+```json
+{
+  "Pregnancies": 2.0,
+  "Glucose": 140.0,
+  "BloodPressure": 80.0,
+  "SkinThickness": 25.0,
+  "Insulin": 100.0,
+  "BMI": 32.5,
+  "DiabetesPedigreeFunction": 0.6,
+  "Age": 35.0
+}
+```
+
+All fields are required and must be `float`.
+
+**Response (success):**
+
+```json
+{
+  "prediction": "high risk",
+  "probability_high_risk": 0.72,
+  "probability_low_risk": 0.28
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `prediction` | `string` | `"high risk"` (class 0) or `"low risk"` (class 1) |
+| `probability_high_risk` | `float` | Probability of class 0 |
+| `probability_low_risk` | `float` | Probability of class 1 |
+
+> **Note:** The API loads the `Logistic_Regression_model.pkl` pipeline from the `models/` directory. This pipeline includes `StandardScaler` followed by `LogisticRegression`, so raw (unscaled) values should be sent.
+
+### `GET /allo`
+
+Debug endpoint — returns the resolved base directory and model file path.
+
+---
+
+## 8. Getting Started
+
+### Prerequisites
+
+- **Docker** and **Docker Compose** (v2+)
+- **Git**
+
+### 8.1 Clone the Repository
 
 ```bash
-git clone <URL_DU_DEPOT_GITHUB>
+git clone https://github.com/abderrazakerrifaouy/DiabetesRisk-AI.git
 cd DiabetesRisk-AI
 ```
 
-Remplacez `<URL_DU_DEPOT_GITHUB>` par l'URL réelle de votre dépôt.
+### 8.2 Environment Variables
 
-### Étape 2 — Lancer les services avec Docker Compose
+The `.env` file at the project root contains the following variables (default values shown):
 
-Vérifiez que le fichier `docker-compose.yml` est présent à la racine du projet.
+```env
+POSTGRES_USER=admin
+POSTGRES_PASSWORD=admin
+POSTGRES_DB=airflow
+MLFLOW_TRACKING_URI=http://mlflow:5000
+AIRFLOW_ADMIN_USER=admin
+AIRFLOW_ADMIN_PASSWORD=admin
+```
 
-Construisez les images et démarrez les services :
+Update `POSTGRES_PASSWORD` and `AIRFLOW_ADMIN_PASSWORD` for non-development deployments.
+
+### 8.3 Build and Start All Services
 
 ```bash
 docker compose up --build -d
 ```
 
-Vérifiez leur état :
+Verify that all containers are healthy:
 
 ```bash
 docker compose ps
 ```
 
-Consultez les journaux en cas de problème :
+### 8.4 Access the Applications
 
-```bash
-docker compose logs -f
-```
-
-Pour consulter les journaux d'un service spécifique :
-
-```bash
-docker compose logs -f diabete-api
-docker compose logs -f diabete-streamlit
-docker compose logs -f diabete-mlflow
-docker compose logs -f diabete-airflow
-```
-
-Ces commandes utilisent les noms de services prévus dans la configuration actuelle du projet. Si les noms changent dans `docker-compose.yml`, adaptez-les en conséquence.
-
-### Étape 3 — Accéder aux applications
-
-Si les ports indiqués sont exposés dans `docker-compose.yml`, les services sont accessibles aux adresses suivantes :
-
-| Service | Adresse |
+| Application | URL |
 |---|---|
-| Application Streamlit | http://localhost:8501 |
-| Documentation FastAPI | http://localhost:8000/docs |
-| Interface MLflow | http://localhost:5000 |
-| Interface Airflow | http://localhost:8080 |
+| Streamlit UI | http://localhost:8501 |
+| FastAPI Docs (Swagger) | http://localhost:8000/docs |
+| MLflow Tracking UI | http://localhost:5000 |
+| Airflow Web UI | http://localhost:8080 |
 
-Ces adresses supposent que les ports correspondants sont publiés et que les services démarrent correctement.
+Log in to Airflow with the credentials defined in `.env` (`admin` / `admin` by default).
 
-### Étape 4 — Tester l'API
+### 8.5 Trigger the Retraining Pipeline
 
-Ouvrez la documentation interactive de FastAPI :
+1. Open the **Airflow UI** at http://localhost:8080.
+2. Enable the `retrain_diabetes_dag` DAG.
+3. Trigger it manually or wait for the monthly schedule.
+4. Monitor task execution: `clean_data → cluster_data → train_model`.
+5. Review logged experiments in the **MLflow UI** at http://localhost:5000.
 
-http://localhost:8000/docs
+### 8.6 Test the API
 
-Sélectionnez l'endpoint `POST /predict`, puis cliquez sur **Try it out**.
+Using the Swagger UI:
 
-Exemple de données JSON :
+1. Go to http://localhost:8000/docs.
+2. Expand `POST /predict` → click **Try it out**.
+3. Paste a sample JSON payload and click **Execute**.
 
-```json
-{
-  "Pregnancies": 2,
-  "Glucose": 140,
-  "BloodPressure": 80,
-  "SkinThickness": 25,
-  "Insulin": 100,
-  "BMI": 32.5,
-  "DiabetesPedigreeFunction": 0.6,
-  "Age": 35
-}
-```
-
-Cliquez sur **Execute** pour envoyer la requête et examiner la réponse.
-
-Les valeurs ci-dessus sont uniquement des données de test. Le résultat dépend du modèle entraîné et de la logique d'interprétation des clusters.
-
-### Étape 5 — Arrêter les services
-
-Pour arrêter les conteneurs :
+Using `curl`:
 
 ```bash
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "Pregnancies": 6,
+    "Glucose": 148,
+    "BloodPressure": 72,
+    "SkinThickness": 35,
+    "Insulin": 125,
+    "BMI": 33.6,
+    "DiabetesPedigreeFunction": 0.627,
+    "Age": 50
+  }'
+```
+
+### 8.7 View Logs
+
+```bash
+# All services
+docker compose logs -f
+
+# Individual service
+docker compose logs -f api
+docker compose logs -f streamlit
+docker compose logs -f mlflow
+docker compose logs -f airflow-webserver
+```
+
+### 8.8 Stop the Stack
+
+```bash
+# Stop containers (data volumes preserved)
 docker compose down
-```
 
-Pour arrêter les conteneurs et supprimer également les volumes gérés par Compose :
-
-```bash
+# Stop containers and remove volumes (⚠ destroys PostgreSQL & MLflow data)
 docker compose down -v
 ```
 
-**Attention :** la seconde commande peut supprimer les données persistantes des services, notamment celles stockées dans les volumes PostgreSQL ou MLflow selon votre configuration.
-
 ---
 
-## 7. API de prédiction
+## 9. Notebooks
 
-L'API est développée avec FastAPI et expose un endpoint de prédiction.
+The `notebooks/` directory contains Jupyter notebooks used during development:
 
-### Endpoint principal
-
-| Propriété | Valeur |
+| Notebook | Description |
 |---|---|
-| Méthode HTTP | `POST` |
-| Endpoint | `/predict` |
-| Format d'entrée | JSON |
-| Entrée | Caractéristiques cliniques du patient |
-| Sortie | Groupe prédit et informations de risque selon l'implémentation |
+| `01_data_profiling.ipynb` | Initial data profiling and quality assessment |
+| `02_eda_guide_graphes.ipynb` | Exploratory data analysis with visualisations |
+| `03_clustering.ipynb` | K-Means clustering experiments (Elbow, Silhouette) |
+| `04_cluster_analysis.ipynb` | Interpretation and analysis of discovered clusters |
 
-La pipeline de Machine Learning doit inclure les transformations nécessaires pour que les nouvelles données soient traitées de la même manière que les données d'entraînement.
-
-L'API doit également gérer les erreurs de validation, l'indisponibilité du modèle et les données incorrectes.
+These notebooks are for exploration and are **not** part of the automated pipeline.
 
 ---
 
-## 8. Résultats et performances
+## 10. Limitations
 
-Les résultats définitifs doivent être renseignés à partir des fichiers de métriques et des expériences réellement enregistrées.
-
-### Comparaison des modèles
-
-| Modèle | Accuracy | Precision | Recall | F1-score |
-|---|---:|---:|---:|---:|
-| Logistic Regression | À renseigner | À renseigner | À renseigner | À renseigner |
-| KNN | À renseigner | À renseigner | À renseigner | À renseigner |
-| SVM | À renseigner | À renseigner | À renseigner | À renseigner |
-| Random Forest | À renseigner | À renseigner | À renseigner | À renseigner |
-
-Les métriques finales doivent être calculées sur l'ensemble de test, sans utiliser cet ensemble pour ajuster les hyperparamètres.
-
-### Résultats du clustering
-
-Les informations à documenter sont :
-
-- Nombre de clusters sélectionné.
-- Inertie du modèle K-Means.
-- Coefficient de silhouette.
-- Effectif de chaque cluster.
-- Moyennes des variables cliniques par cluster.
-- Interprétation des groupes et correspondance avec `risk_category`.
-
-### Modèle retenu
-
-Le modèle final doit être sélectionné en tenant compte des performances de classification, de la généralisation, de la robustesse et des objectifs du projet.
-
-La pipeline complète est sauvegardée dans un fichier sérialisé afin de pouvoir être utilisée par l'API de prédiction.
+- Predictions depend on the quality and representativeness of the training dataset.
+- Cluster assignments from K-Means are statistical groupings, not clinically validated categories.
+- The mapping between cluster IDs and risk levels is based on observed feature averages and may not generalise.
+- Model performance should be validated on external data before any real-world use.
+- The API does not implement authentication or rate limiting.
+- Displayed results do not constitute medical advice.
 
 ---
 
-## 9. Captures d'écran
+## 11. Future Improvements
 
-Ajoutez des captures d'écran réelles de l'application et des outils utilisés.
-
-### Application Streamlit
-
-![Application Streamlit](docs/screenshots/streamlit-app.png)
-
-### Documentation FastAPI
-
-![Documentation FastAPI](docs/screenshots/fastapi-docs.png)
-
-### Suivi des expériences MLflow
-
-![Interface MLflow](docs/screenshots/mlflow-tracking.png)
-
-### Orchestration avec Airflow
-
-![Interface Airflow](docs/screenshots/airflow-dag.png)
-
-Les images ci-dessus correspondent à des chemins à créer dans le dépôt. Remplacez-les par vos propres captures d'écran pour qu'elles s'affichent correctement sur GitHub.
+- Integrate additional and more diverse datasets.
+- Add comprehensive unit and integration tests.
+- Implement automated model validation gates before promoting to production.
+- Add data drift detection and prediction monitoring.
+- Secure the API with authentication and HTTPS.
+- Set up a CI/CD pipeline for automated testing and deployment.
+- Use the MLflow Model Registry for model versioning and stage management.
 
 ---
 
-## 10. Limites du projet
+## 12. Author & Academic Context
 
-- Les prédictions dépendent de la qualité et de la représentativité du dataset utilisé.
-- Les groupes produits par K-Means ne correspondent pas nécessairement à des catégories médicales validées.
-- Les performances doivent être vérifiées sur des données inédites.
-- Une classification parfaite sur un ensemble de test ne garantit pas une bonne généralisation ; les éventuelles fuites de données doivent être vérifiées.
-- Les recommandations affichées ne constituent pas un avis médical.
-- La mise en production nécessite une gestion appropriée des erreurs, des versions des modèles, de la sécurité et des données.
-
----
-
-## 11. Perspectives d'amélioration
-
-- Enrichir le dataset avec des données plus diversifiées.
-- Renforcer la validation et la reproductibilité des expériences.
-- Ajouter des tests unitaires et des tests d'intégration.
-- Mettre en place une validation automatique des performances avant de promouvoir un modèle.
-- Améliorer la surveillance des prédictions et la détection de dérive des données.
-- Renforcer la sécurité de l'API et la gestion des accès.
-- Automatiser les tests et le déploiement avec une pipeline CI/CD.
-
----
-
-## 12. Auteur et contexte pédagogique
-
-**Projet :** Système Intelligent de Prédiction du Risque de Diabète  
-**Nom du dépôt :** DiabetesRisk-AI  
-**Formateur / référent :** Hamid OUFAKIR  
-**Date de création du brief :** 23/09/2026  
-**Période de réalisation prévue :** du 28/09/2026 au 09/10/2026  
-**Formation / référentiel :** Certification RNCP Développeur·se en Intelligence Artificielle
-
-**Dépôt GitHub :** À compléter  
-**Lien Jira :** À compléter
-
----
-
-## Conclusion
-
-DiabetesRisk-AI met en œuvre un pipeline complet de Machine Learning, depuis la préparation des données jusqu'à la prédiction via une API et une interface web. L'intégration de MLflow, d'Airflow et de Docker permet d'aborder les principes fondamentaux du MLOps, notamment le suivi des expériences, la reproductibilité, l'orchestration et le déploiement des modèles.
+| | |
+|---|---|
+| **Project** | Intelligent Diabetes Risk Prediction System |
+| **Repository** | DiabetesRisk-AI |
+| **Instructor** | Hamid OUFAKIR |
+| **Brief date** | 23/09/2026 |
+| **Implementation period** | 28/09/2026 – 09/10/2026 |
+| **Programme** | RNCP – Développeur·se en Intelligence Artificielle |
